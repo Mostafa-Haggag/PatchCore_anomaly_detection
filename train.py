@@ -69,29 +69,74 @@ class KNN(NN):
         return knn
 
 def prep_dirs(root):
+
+    # you retun path of embeeding, sample and the src
+    # the root is the logger path
     # make embeddings dir
+    # you create path of embedding
     embeddings_path = os.path.join('./', 'embeddings', args.category)
+    # you create a folders inside the embedding
     os.makedirs(embeddings_path, exist_ok=True)
+    # what is the root dir ???
+    # you save inside the root path a folder called sample
     # make sample dir
     sample_path = os.path.join(root, 'sample')
     os.makedirs(sample_path, exist_ok=True)
     # make source code record dir & copy
+    # you have somethign calleld source
     source_code_save_path = os.path.join(root, 'src')
     os.makedirs(source_code_save_path, exist_ok=True)
     return embeddings_path, sample_path, source_code_save_path
 
 def embedding_concat(x, y):
     # from https://github.com/xiahaifeng1995/PaDiM-Anomaly-Detection-Localization-master
+    # This function is designed to concatenate feature maps from two different layers
+    # (or embeddings), x and y,
+    # while ensuring that the spatial sizes of the embeddings are compatible.
+    # It reshapes
+    # and concatenates the embeddings in a way that can be useful for
+    # tasks like anomaly detection.
     B, C1, H1, W1 = x.size()
     _, C2, H2, W2 = y.size()
+    # The function assumes that H1 is an integer multiple of H2,
+    # and similarly for the widths (W1 and W2).
+    # This ensures that the feature maps can be processed and concatenated correctly.
     s = int(H1 / H2)
+    # s = int(H1 / H2) calculates the scale factor between the heights (and widths) of x and y.
+    # This factor, s, represents how much larger the dimensions of x are compared to y.
     x = F.unfold(x, kernel_size=s, dilation=1, stride=s)
+    # The unfold operation converts the feature map x into a series of non-overlapping
+    # patches (each of size s).
+    # This transforms x from a 4D tensor of shape (B, C1, H1, W1)
+    # to a 3D tensor with shape (B, C1, num_patches), where num_patches depends on H2 and W2.
     x = x.view(B, C1, -1, H2, W2)
+    # x = x.view(B, C1, -1, H2, W2): Reshape x so that it is back into a 4D
+    # tensor but with reduced spatial dimensions (H2, W2) that match the size of y.
+    # The third dimension -1 corresponds to the number of patches extracted from x.
     z = torch.zeros(B, C1 + C2, x.size(2), H2, W2)
+    # z = torch.zeros(B, C1 + C2, x.size(2), H2, W2):
+    # Create an empty tensor z to store the concatenated feature maps
+    # from x and y. The number of channels in z will be C1 + C2 to
+    # accommodate both feature maps.
+
+
+    # The loop for i in range(x.size(2))
+    # iterates over the patches in x,
+    # and torch.cat((x[:, :, i, :, :], y), 1)
+    # concatenates the feature maps x and y along the channel dimension (1st dimension).
+    # z[:, :, i, :, :] = torch.cat(...):
+    # Stores the concatenated result for each patch into the corresponding position in z.
     for i in range(x.size(2)):
         z[:, :, i, :, :] = torch.cat((x[:, :, i, :, :], y), 1)
+    # z = z.view(B, -1, H2 * W2):
+    # Reshape z to be compatible for folding back into the original spatial dimensions.
     z = z.view(B, -1, H2 * W2)
+    # z = F.fold(z, kernel_size=s, output_size=(H1, W1), stride=s):
+    # The fold operation reverses the unfold operation,
+    # reassembling the patches into a full feature map with spatial dimensions (H1, W1).
     z = F.fold(z, kernel_size=s, output_size=(H1, W1), stride=s)
+    # z: A tensor of shape (B, C1 + C2, H1, W1),
+    # where the feature maps from x and y have been concatenated and reassembled.
     return z
 
 def reshape_embedding(embedding):
@@ -103,11 +148,13 @@ def reshape_embedding(embedding):
     return embedding_list
 
 #imagenet
+# similar to everything we did before
 mean_train = [0.485, 0.456, 0.406]
 std_train = [0.229, 0.224, 0.225]
 
 class MVTecDataset(Dataset):
     def __init__(self, root, transform, gt_transform, phase):
+        # typical way to with with mvtec dataset
         if phase=='train':
             self.img_path = os.path.join(root, 'train')
         else:
@@ -116,6 +163,7 @@ class MVTecDataset(Dataset):
         self.transform = transform
         self.gt_transform = gt_transform
         # load dataset
+        # this is very intersting
         self.img_paths, self.gt_paths, self.labels, self.types = self.load_dataset() # self.labels => good : 0, anomaly : 1
 
     def load_dataset(self):
@@ -126,22 +174,30 @@ class MVTecDataset(Dataset):
         tot_types = []
 
         defect_types = os.listdir(self.img_path)
+        # you are listing everythign in this directory
         
         for defect_type in defect_types:
             if defect_type == 'good':
                 img_paths = glob.glob(os.path.join(self.img_path, defect_type) + "/*.png")
+                img_paths.sort()
                 img_tot_paths.extend(img_paths)
+                # list filled with 0 repeated to number of image paths
                 gt_tot_paths.extend([0]*len(img_paths))
+                # list filled with 0 repeated to number of image paths
                 tot_labels.extend([0]*len(img_paths))
+                # list filled with good repeated to number of image paths
                 tot_types.extend(['good']*len(img_paths))
             else:
                 img_paths = glob.glob(os.path.join(self.img_path, defect_type) + "/*.png")
+                # this is not needed if you have no ground truths
                 gt_paths = glob.glob(os.path.join(self.gt_path, defect_type) + "/*.png")
                 img_paths.sort()
                 gt_paths.sort()
                 img_tot_paths.extend(img_paths)
                 gt_tot_paths.extend(gt_paths)
+                # you are putting alot of 1s in hrere
                 tot_labels.extend([1]*len(img_paths))
+                # you have different types of defects in here
                 tot_types.extend([defect_type]*len(img_paths))
 
         assert len(img_tot_paths) == len(gt_tot_paths), "Something wrong with test and ground truth pair!"
@@ -153,30 +209,59 @@ class MVTecDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path, gt, label, img_type = self.img_paths[idx], self.gt_paths[idx], self.labels[idx], self.types[idx]
+        # takes teh image as rgb
         img = Image.open(img_path).convert('RGB')
+        # apply the transformation
         img = self.transform(img)
         if gt == 0:
+            # createa fake mask
             gt = torch.zeros([1, img.size()[-2], img.size()[-2]])
         else:
             gt = Image.open(gt)
             gt = self.gt_transform(gt)
         
         assert img.size()[1:] == gt.size()[1:], "image.size != gt.size !!!"
-
+        # return to me the basnemd missing the .png thigns
+        # this is the idea
         return img, gt, label, os.path.basename(img_path[:-4]), img_type
 
 def cvt2heatmap(gray):
+    # What does that do exactly ???
+    # This function converts a grayscale image into a heatmap using
+    # OpenCV's applyColorMap function.
+    # gray: A grayscale image, typically a 2D array of pixel intensity values.
+    # you must first
+    # Converts the input grayscale image to an 8-bit unsigned integer type (uint8),
+    # ensuring that pixel values
+    # are within the 0-255 range. This is necessary because applyColorMap expects an 8-bit image.
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
+    #  This function applies a color map (in this case, COLORMAP_JET)
+    #  to the grayscale image. A color map assigns
+    #  different colors to different intensity levels,
+    #  effectively creating a "heatmap" where lower intensities might appear
+    #  blue, mid-range intensities green, and high intensities red.
+    #  A 3-channel (RGB) heatmap image where colors represent the intensity levels of the original grayscale image.
     return heatmap
 
 def heatmap_on_image(heatmap, image):
+    # i donot like this function so much but we can improve for abit
+    # This function overlays a heatmap on an original image,
+    # blending the two together. The detailed explanation:
     if heatmap.shape != image.shape:
+        # to avoid error
         heatmap = cv2.resize(heatmap, (image.shape[0], image.shape[1]))
     out = np.float32(heatmap)/255 + np.float32(image)/255
+    # This step ensures that blending the two images gives proportional weight to both.
+    # Adds the two normalized images together, pixel by pixel.
     out = out / np.max(out)
+    #  Normalizes the result to ensure that the maximum value across the image is 1.
+    #  This is done to prevent any pixel value from exceeding 1 after the addition.
     return np.uint8(255 * out)
 
 def min_max_norm(image):
+    # like this you make sure that everything is between 0 to 1
+    # This function performs min-max normalization, ensuring that all pixel values
+    # in the input image are scaled between 0 and 1. The detailed steps:
     a_min, a_max = image.min(), image.max()
     return (image-a_min)/(a_max - a_min)    
     
@@ -186,6 +271,8 @@ class PatchCore(pl.LightningModule):
         super(PatchCore, self).__init__()
 
         self.save_hyperparameters(hparams)
+        # this is part of lighting module can be usinged
+        # to save hyper paramters
 
         self.init_features()
         def hook_t(module, input, output):
@@ -194,17 +281,24 @@ class PatchCore(pl.LightningModule):
         self.model = torch.hub.load('pytorch/vision:v0.9.0', 'wide_resnet50_2', pretrained=True)
 
         for param in self.model.parameters():
+            # making sure that you are not optimizing anything at all in here
             param.requires_grad = False
 
         self.model.layer2[-1].register_forward_hook(hook_t)
         self.model.layer3[-1].register_forward_hook(hook_t)
 
+        # mse loss in here
         self.criterion = torch.nn.MSELoss(reduction='sum')
 
         self.init_results_list()
-
+        # a group of  lists that needs to be defiened
+        # you use to put the results
+        # you load with 256
+        # you go down to 224 with center crop
+        # you apply normal mean and std
+        # plreace Image.ANTIALIAS with Image.LANCZOS
         self.data_transforms = transforms.Compose([
-                        transforms.Resize((args.load_size, args.load_size), Image.ANTIALIAS),
+                        transforms.Resize((args.load_size, args.load_size), Image.LANCZOS),
                         transforms.ToTensor(),
                         transforms.CenterCrop(args.input_size),
                         transforms.Normalize(mean=mean_train,
@@ -213,7 +307,8 @@ class PatchCore(pl.LightningModule):
                         transforms.Resize((args.load_size, args.load_size)),
                         transforms.ToTensor(),
                         transforms.CenterCrop(args.input_size)])
-
+        # this is denormalization method to remove the fucking normalization
+        # if you want to view the iamge
         self.inv_normalize = transforms.Normalize(mean=[-0.485/0.229, -0.456/0.224, -0.406/0.255], std=[1/0.229, 1/0.224, 1/0.255])
 
     def init_results_list(self):
@@ -224,6 +319,9 @@ class PatchCore(pl.LightningModule):
         self.img_path_list = []        
 
     def init_features(self):
+        # being called to create an empty lsit that getts filled with the features
+        # every forwards pass you call it
+        # called when you intizailize the class
         self.features = []
 
     def forward(self, x_t):
@@ -261,11 +359,13 @@ class PatchCore(pl.LightningModule):
         return None
 
     def on_train_start(self):
+        # these are dir to save everthing
         self.model.eval() # to stop running_var move (maybe not critical)        
         self.embedding_dir_path, self.sample_path, self.source_code_save_path = prep_dirs(self.logger.log_dir)
         self.embedding_list = []
     
     def on_test_start(self):
+        # these are the paths to save everyting
         self.embedding_dir_path, self.sample_path, self.source_code_save_path = prep_dirs(self.logger.log_dir)
         self.index = faiss.read_index(os.path.join(self.embedding_dir_path,'index.faiss'))
         if torch.cuda.is_available():
@@ -344,8 +444,8 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='ANOMALYDETECTION')
     parser.add_argument('--phase', choices=['train','test'], default='train')
-    parser.add_argument('--dataset_path', default=r'./MVTec')
-    parser.add_argument('--category', default='bottle')
+    parser.add_argument('--dataset_path', default=r'/media/mostafahaggag/Shared_Drive/selfdevelopment/datasets/mvtec_anomaly_detection')
+    parser.add_argument('--category', default='screw')
     parser.add_argument('--num_epochs', default=1)
     parser.add_argument('--batch_size', default=32)
     parser.add_argument('--load_size', default=256)
